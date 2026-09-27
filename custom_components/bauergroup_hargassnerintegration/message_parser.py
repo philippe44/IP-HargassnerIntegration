@@ -50,11 +50,12 @@ class ParameterDefinition:
             return None
 
         try:
+
             raw_value = values[self.index]
 
             if self.is_digital and self.bit_mask is not None:
                 # Digital parameter - extract bit
-                int_value = int(raw_value)
+                int_value = int(raw_value, 16)
                 return bool(int_value & self.bit_mask)
 
             # Analog parameter - convert to number

@@ -43,6 +43,29 @@ from .firmware_templates import PARAMETER_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
+# Bidirectional mapping for parameter name variants (umlauts vs ASCII-normalized)
+# Some firmware templates use German umlauts, others use ASCII replacements
+_PARAM_NAME_ALIASES: dict[str, str] = {
+    "Verbrauchszähler": "Verbrauchszaehler",
+    "Verbrauchszaehler": "Verbrauchszähler",
+    "Störungs Nr": "Storungs Nr",
+    "Storungs Nr": "Störungs Nr",
+    "Stoerungs Nr": "Störungs Nr",
+    "Puff Füllgrad": "Puff Fuellgrad",
+    "Puff Fuellgrad": "Puff Füllgrad",
+}
+
+
+def _get_param_data(data: dict, key: str) -> dict | None:
+    """Get parameter data with umlaut-normalized fallback."""
+    result = data.get(key)
+    if result is not None:
+        return result
+    alt_key = _PARAM_NAME_ALIASES.get(key)
+    if alt_key:
+        return data.get(alt_key)
+    return None
+
 
 # =============================================================================
 # STANDARD SENSOR SET
@@ -80,13 +103,31 @@ STANDARD_SENSORS = [
     ("TVLs_1", "Vorlauf Soll Heizkreis 1", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:target"),
     ("TRL", "Rücklauftemperatur", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
     # --- Warmwasser ---
-    ("TB1", "Warmwasser", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:water-boiler"),
-    ("TBs_1", "Warmwasser Soll", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:target"),
+    ("TB2", "Warmwasser", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:water-boiler"),
+    ("TBs_2", "Warmwasser Soll", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:target"),
     # --- Außentemperatur ---
     ("Taus", "Außentemperatur", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:thermometer"),
     # --- Pellets ---
     ("Lagerstand", "Pelletvorrat", None, SensorStateClass.TOTAL, "mdi:silo"),
     ("Verbrauchszähler", "Pelletverbrauch", None, SensorStateClass.TOTAL_INCREASING, "mdi:counter"),
+    # mods                                                                                                                               
+    ("Rein Run", "Reinigung Läuft", None, SensorStateClass.MEASUREMENT, "mdi:broom"),
+    ("TVL_A", "Vorlauf Heizkreis A", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("TVL_3", "Vorlauf Heizkreis 3", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("TVL_4", "Vorlauf Heizkreis 4", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("TRA_A", "Rücklauf HK A", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("TRA_3", "Rücklauf HK 3", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("TRA_4", "Rücklauf HK 4", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:coolant-temperature"),
+    ("HKPA", "Pump A", None, None, "mdi:pump"),
+    ("HKZustand_A", "HC A state", SensorDeviceClass.POWER, None, "mdi:heat-wave"),
+    ("MAA", "Mixer A open", None, None, "mdi:valve-open"),
+    ("HKP3", "Pump 3", None, None, "mdi:pump"),
+    ("HKZustand_3", "HC 3 state", SensorDeviceClass.POWER, None, "mdi:heat-wave"),
+    ("M3A", "Mixer 3 open", None, None, "mdi:valve-open"),
+    ("HKP4", "Pump 4", None, None, "mdi:pump"),
+    ("HKZustand_4", "HC 4 state", SensorDeviceClass.POWER, None, "mdi:heat-wave"),
+    ("M4A", "Mixer 4 open", None, None, "mdi:valve-open"),
+    ("Aschebox", "Aschebox", None, None, "mdi:delete-alert"),
 ]
 
 
@@ -136,7 +177,7 @@ async def async_setup_entry(
             if not param_def.is_digital:
                 # Most analog sensors are measurements
                 # Special cases for counters
-                if param_name in ["Verbrauchszähler", "Brennerstarts", "Betriebsstunden"]:
+                if param_name in ["Verbrauchszähler", "Verbrauchszaehler", "Brennerstarts", "Betriebsstunden"]:
                     state_class = SensorStateClass.TOTAL_INCREASING
                 elif param_name == "Lagerstand":
                     state_class = SensorStateClass.TOTAL
@@ -273,7 +314,7 @@ class HargassnerStateSensor(HargassnerBaseSensor):
     @property
     def native_value(self) -> str | None:
         """Return boiler state."""
-        zk_data = self.coordinator.data.get("ZK")
+        zk_data = _get_param_data(self.coordinator.data, "ZK")
         if not zk_data:
             return None
 
@@ -289,7 +330,7 @@ class HargassnerStateSensor(HargassnerBaseSensor):
     @property
     def icon(self) -> str:
         """Return icon based on state."""
-        zk_data = self.coordinator.data.get("ZK")
+        zk_data = _get_param_data(self.coordinator.data, "ZK")
         if zk_data:
             try:
                 state_idx = int(zk_data.get("value", 0))
@@ -326,7 +367,7 @@ class HargassnerErrorSensor(HargassnerBaseSensor):
         """Return error status."""
         # Get error code from "Störungs Nr" analog parameter
         # 0 = no error, >0 = error code
-        error_code_data = self.coordinator.data.get("Störungs Nr")
+        error_code_data = _get_param_data(self.coordinator.data, "Störungs Nr")
 
         if not error_code_data:
             return "OK"
@@ -341,7 +382,12 @@ class HargassnerErrorSensor(HargassnerBaseSensor):
         if error_info:
             return error_info[self._language.lower()]
 
-        return f"Error {error_code}"
+        # Unknown error code - add to options dynamically for ENUM compatibility
+        lang = self._language.lower()
+        fallback = f"Error {error_code}" if lang == "en" else f"Fehler {error_code}"
+        if fallback not in self._attr_options:
+            self._attr_options.append(fallback)
+        return fallback
 
     @property
     def icon(self) -> str:
@@ -377,7 +423,7 @@ class HargassnerParameterSensor(HargassnerBaseSensor):
     @property
     def native_value(self) -> float | int | str | None:
         """Return parameter value."""
-        param_data = self.coordinator.data.get(self._param_key)
+        param_data = _get_param_data(self.coordinator.data, self._param_key)
         if param_data:
             return param_data.get("value")
         return None
@@ -385,7 +431,7 @@ class HargassnerParameterSensor(HargassnerBaseSensor):
     @property
     def native_unit_of_measurement(self) -> str | None:
         """Return unit of measurement."""
-        param_data = self.coordinator.data.get(self._param_key)
+        param_data = _get_param_data(self.coordinator.data, self._param_key)
         if param_data and param_data.get("unit"):
             unit = param_data["unit"]
 
@@ -425,7 +471,7 @@ class HargassnerEnergySensor(HargassnerBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return heat output in kWh (calculated from pellet consumption with efficiency)."""
-        pellet_data = self.coordinator.data.get("Verbrauchszähler")
+        pellet_data = _get_param_data(self.coordinator.data, "Verbrauchszähler")
         if pellet_data:
             try:
                 pellets_kg = float(pellet_data.get("value", 0))

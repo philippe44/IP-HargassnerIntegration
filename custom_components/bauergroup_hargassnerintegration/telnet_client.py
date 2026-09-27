@@ -267,6 +267,10 @@ class HargassnerTelnetClient:
 
                 # Parse message
                 try:
+                    _LOGGER.debug(                          
+                        "Parsing %s",                                                  
+                        line,                         
+                    ) 
                     parsed_data = self._parser.parse_message(line)
 
                     if parsed_data:
